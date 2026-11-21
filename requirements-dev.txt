@@ -1,0 +1,5 @@
+# Only needed to rebuild the icon font (tools/build_weather_icons.py).
+# The app, the tests and tools/screenshot_to_png.py use the standard library.
+fonttools==4.68.0
+brotli==1.2.1
+Pillow==13.0.0

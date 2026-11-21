@@ -1,0 +1,30 @@
+{
+ "ipVersion": 4,
+ "ipAddress": "203.0.113.7",
+ "latitude": 35.694,
+ "longitude": 139.7536,
+ "countryName": "Japan",
+ "countryCode": "JP",
+ "capital": "Tokyo",
+ "phoneCodes": [
+  81
+ ],
+ "timeZones": [
+  "Asia/Tokyo"
+ ],
+ "zipCode": "100-0005",
+ "cityName": "Chiyoda",
+ "regionName": "Tokyo",
+ "regionCode": "13",
+ "continent": "Asia",
+ "continentCode": "AS",
+ "currencies": [
+  "JPY"
+ ],
+ "languages": [
+  "ja"
+ ],
+ "asn": "64500",
+ "asnOrganization": "Example ISP",
+ "isProxy": false
+}
