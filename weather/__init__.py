@@ -38,8 +38,34 @@ SAVE_DELAY_MS = 3000           # write the selected city after this much quiet
 HOUR_SLOTS = 7             # "13:00" labels need ~44 px cells
 DAY_SLOTS = 7
 
-CITY_LIST = [{"key": name, "name": name, "lat": lat, "lon": lon, "here": False}
-             for name, lat, lon in CITIES[:MAX_CITIES]]
+
+
+def _city(name, lat, lon):
+    return {"key": name, "name": name, "lat": lat, "lon": lon, "here": False}
+
+
+def _load_cities():
+    """The registered cities from /state (Settings > Cities), else the defaults in cities.py."""
+    data = {"list": None}
+    State.load("weather_cities", data)
+    out, seen = [], set()
+    entries = data.get("list")
+    for entry in entries if isinstance(entries, list) else ():
+        # A damaged or hand-edited file must not stop the app: skip anything odd.
+        if (isinstance(entry, (list, tuple)) and len(entry) == 3 and isinstance(entry[0], str)
+                and 0 < len(entry[0]) <= 24 and entry[0] not in seen and entry[0] != "here"
+                and all(isinstance(v, (int, float)) for v in entry[1:])
+                and -90 <= entry[1] <= 90 and -180 <= entry[2] <= 180):
+            seen.add(entry[0])
+            out.append(_city(*entry))
+    return out[:MAX_CITIES] if out else [_city(*c) for c in CITIES[:MAX_CITIES]]
+
+
+def save_cities():
+    State.save("weather_cities", {"list": [[c["name"], c["lat"], c["lon"]] for c in CITY_LIST]})
+
+
+CITY_LIST = _load_cities()
 
 DEFAULTS = {"step": "hour", "temp": "C", "wind": "m/s", "rain": "mm", "clock": "24h",
             "location": "on", "last_city": None}
@@ -84,7 +110,7 @@ def forget_here():
     g = cache.get("geo")
     if g:
         key = "%.3f,%.3f" % (g["lat"], g["lon"])
-        if key not in {"%.3f,%.3f" % (c[1], c[2]) for c in CITIES}:
+        if key not in {"%.3f,%.3f" % (c["lat"], c["lon"]) for c in CITY_LIST}:
             cache["data"].pop(key, None)
     cache["geo"] = None
     cache["geo_at"] = 0
@@ -108,10 +134,12 @@ offset = 0                # cursor: hours (hour mode) or days (day mode) from no
 strip_first = 0
 held_since = None
 next_repeat = 0
-overlay = None            # None, "menu" or "about"
+overlay = None            # None, "menu", "about" or a Cities screen (see CITY_SCREENS)
 menu_index = 0
 menu_first = 0            # first visible menu row (the list scrolls)
-shot_since = None         # Settings > Screenshot, or holding the Back touch pad, saves the screen
+# Holding Select for SHOT_HOLD_MS saves the screen.
+# Select acts on release (see TapHold) so that a hold never also acts.
+TAP_GRACE_MS = 120        # a press lasts at least this long, in case held() lags pressed()
 shot_pending = False
 shot_note_until = 0
 SHOT_HOLD_MS = 1500
@@ -260,7 +288,7 @@ def refresh_due():
 # ---- input -------------------------------------------------------------------------
 
 def any_input():
-    for button in (BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_SELECT, BUTTON_BACK, BUTTON_MENU):
+    for button in (BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_SELECT):
         if badge.pressed(button) or badge.held(button):
             return True
     return False
@@ -304,15 +332,18 @@ def move_time(step):
 
 MENU = (
     ("Step", "step", ("hour", "day"), ("Hourly", "Daily")),
+    ("Units", None, None, None),
+    ("Clock", "clock", units.CLOCKS, units.CLOCKS),
+    ("Cities", None, None, None),
+    ("Refresh now", None, None, None),
+    ("About", None, None, None),
+)
+
+# Settings > Units, a submenu of value rows (same shape as MENU entries).
+UNITS_MENU = (
     ("Temperature", "temp", units.TEMP_UNITS, ("°C", "°F")),
     ("Wind", "wind", units.WIND_UNITS, units.WIND_UNITS),
     ("Rain", "rain", units.RAIN_UNITS, units.RAIN_UNITS),
-    ("Clock", "clock", units.CLOCKS, units.CLOCKS),
-    ("Location", "location", ("on", "off"), ("On", "Off")),
-    ("Refresh now", None, None, None),
-    ("Screenshot", None, None, None),
-    ("About", None, None, None),
-    ("Close", None, None, None),
 )
 
 
@@ -329,6 +360,8 @@ def cycle(entry, step):
 
 
 def handle_menu():
+    """Menu keys (all screens): Up/Down move, Left goes back, Right (or Select) selects.
+    On a value row, selecting steps to the next value."""
     global overlay, menu_index, shot_pending
     entry = MENU[menu_index]
     if badge.pressed(BUTTON_UP):
@@ -337,24 +370,21 @@ def handle_menu():
     elif badge.pressed(BUTTON_DOWN):
         menu_index = (menu_index + 1) % len(MENU)
         scroll_menu()
-    elif entry[1] and badge.pressed(BUTTON_LEFT):
-        cycle(entry, -1)
-    elif entry[1] and (badge.pressed(BUTTON_RIGHT) or badge.pressed(BUTTON_SELECT)):
+    elif badge.pressed(BUTTON_LEFT):
+        close_menu()
+    elif entry[1] and (badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped):
         cycle(entry, 1)
-    elif badge.pressed(BUTTON_SELECT):
+    elif badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped:
         label = entry[0]
         if label == "Refresh now":
             close_menu()
             start_refresh("manual", want_geo=True)
-        elif label == "Screenshot":
-            close_menu()            # this frame is drawn without the menu, then saved
-            shot_pending = True
         elif label == "About":
             overlay = "about"
-        else:
-            close_menu()
-    elif badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_MENU):
-        close_menu()
+        elif label == "Units":
+            open_screen("units", 0)
+        elif label == "Cities":
+            open_cities(0)
 
 
 def scroll_menu():
@@ -377,32 +407,210 @@ def set_location(on):
         forget_here()
         State.save("weather_cache", cache)
         if selection == "here":
-            selection = settings.get("last_city") or (CITY_LIST[0]["key"] if CITY_LIST else None)
+            selection = settings.get("last_city") or CITY_LIST[0]["key"]
 
 
 def close_menu():
-    global overlay
+    global overlay, cities_dirty
     overlay = None
     State.save("weather", settings)
+    if cities_dirty:
+        cities_dirty = False
+        start_refresh("manual", want_geo=False)
+
+
+# ---- Settings > Cities ---------------------------------------------------------------
+#
+# "units"   Temperature / Wind / Rain (Settings > Units, not a Cities screen,
+#           but it shares the list handling)
+# "cities"  Location (the IP-based "Here" on/off), the registered cities, then
+#           "+ Add city" (while fewer than MAX_CITIES)
+# "city"    Move up / Move down / Remove for one registered city
+# "regions" catalog regions;  "catalog"  the cities of one region (Select adds)
+
+CITY_SCREENS = ("units", "cities", "city", "regions", "catalog")
+sub_index = 0
+sub_first = 0
+editing = 0               # index in CITY_LIST on the "city" screen
+region = 0                # index in catalog.REGIONS on the "catalog" screen
+cities_dirty = False      # list changed: refetch when the menu closes
+city_first = 0            # scroll of the Cities list drawn behind the city popup
+
+
+def open_cities(city):
+    """Open the Cities list with registered city `city` (len(CITY_LIST) = "+ Add city") selected."""
+    open_screen("cities", city + 1)
+
+
+def toggle_location():
+    settings["location"] = "off" if settings["location"] == "on" else "on"
+    set_location(settings["location"] == "on")
+
+
+def open_screen(name, index):
+    global overlay, sub_index, sub_first
+    overlay = name
+    sub_index = index
+    sub_first = 0
+    scroll_sub()
+
+
+def sub_items():
+    """(title, [(label, value, arrows), ...]) for the open Cities screen."""
+    if overlay == "units":
+        return "Units", [(label, names[values.index(settings[key])], True)
+                         for label, key, values, names in UNITS_MENU]
+    if overlay == "cities":
+        return cities_items()
+    if overlay == "city":
+        items = [("Move up", None, False), ("Move down", None, False)]
+        if len(CITY_LIST) > 1:
+            items.append(("Remove", None, False))
+        return CITY_LIST[editing]["name"], items
+    import catalog
+    if overlay == "regions":
+        return "Add city", [(r[0], None, True) for r in catalog.REGIONS]
+    names = {c["name"] for c in CITY_LIST}
+    title, entries = catalog.REGIONS[region]
+    return title, [(e[0], "Added" if e[0] in names else None, False) for e in entries]
+
+
+def cities_items():
+    """(title, items) of the Cities list, also drawn behind the city popup."""
+    items = [("Location", "On" if settings["location"] == "on" else "Off", True)]
+    items += [(c["name"], None, True) for c in CITY_LIST]
+    if len(CITY_LIST) < MAX_CITIES:
+        items.append(("+ Add city", None, True))
+    return "Cities %d/%d" % (len(CITY_LIST), MAX_CITIES), items
+
+
+def list_first(index, first, count):
+    """Scroll offset keeping row `index` of `count` inside ui.MENU_ROWS rows."""
+    rows = min(ui.MENU_ROWS, count)
+    if index < first:
+        first = index
+    elif index >= first + rows:
+        first = index - rows + 1
+    return max(0, min(first, count - rows))
+
+
+def scroll_sub():
+    global sub_first
+    sub_first = list_first(sub_index, sub_first, len(sub_items()[1]))
+
+
+def cities_changed():
+    """Save the list, and stop a download whose URL no longer matches it."""
+    global job, selection, cities_dirty
+    save_cities()
+    cities_dirty = True
+    if job is not None:
+        job.cancel()
+        job = None
+    keys = [c["key"] for c in CITY_LIST]
+    if settings.get("last_city") not in keys:
+        settings["last_city"] = keys[0]
+    if selection != "here" and selection not in keys:
+        selection = settings["last_city"]
+
+
+def sub_back():
+    if overlay == "units":
+        open_menu_at("Units")
+    elif overlay == "cities":
+        open_menu_at("Cities")
+    elif overlay == "city":
+        open_cities(editing)
+    elif overlay == "regions":
+        open_cities(len(CITY_LIST))
+    else:
+        open_screen("regions", region)
+
+
+def open_menu_at(label):
+    global overlay, menu_index
+    overlay = "menu"
+    menu_index = [m[0] for m in MENU].index(label)
+    scroll_menu()
+
+
+def sub_select():
+    global editing, region, city_first
+    _, items = sub_items()
+    label = items[sub_index][0]
+    if overlay == "units":
+        cycle(UNITS_MENU[sub_index], 1)
+    elif overlay == "cities":
+        if label == "Location":
+            toggle_location()
+        elif label == "+ Add city":
+            open_screen("regions", 0)
+        else:
+            editing = sub_index - 1
+            city_first = sub_first
+            open_screen("city", 0)
+    elif overlay == "city":
+        if label == "Remove":
+            CITY_LIST.pop(editing)
+            cities_changed()
+            open_cities(min(editing, len(CITY_LIST) - 1))
+            return
+        to = editing - 1 if label == "Move up" else editing + 1
+        if 0 <= to < len(CITY_LIST):
+            CITY_LIST[editing], CITY_LIST[to] = CITY_LIST[to], CITY_LIST[editing]
+            editing = to
+            cities_changed()
+    elif overlay == "regions":
+        region = sub_index
+        open_screen("catalog", 0)
+    else:
+        import catalog
+        name, lat, lon = catalog.REGIONS[region][1][sub_index]
+        if any(c["name"] == name for c in CITY_LIST):
+            return
+        if len(CITY_LIST) < MAX_CITIES:
+            CITY_LIST.append(_city(name, lat, lon))
+            cities_changed()
+            open_cities(len(CITY_LIST) - 1)
+
+
+def handle_cities():
+    global sub_index
+    count = len(sub_items()[1])
+    if badge.pressed(BUTTON_UP):
+        sub_index = (sub_index - 1) % count
+        scroll_sub()
+    elif badge.pressed(BUTTON_DOWN):
+        sub_index = (sub_index + 1) % count
+        scroll_sub()
+    elif SELECT_KEY.tapped or badge.pressed(BUTTON_RIGHT):
+        sub_select()
+    elif badge.pressed(BUTTON_LEFT):
+        sub_back()
 
 
 def handle_input():
     global overlay, last_input, menu_index
     if any_input():
         last_input = badge.ticks
+    # Holding Select saves a screenshot on every screen, so it acts on release
+    # (TapHold.tapped) rather than on press.
+    watch_screenshot_hold()
     if overlay == "about":
-        if badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_SELECT):
+        if badge.pressed(BUTTON_LEFT) or badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped:
             overlay = "menu"
         return
     if overlay == "menu":
         handle_menu()
         return
-    if badge.pressed(BUTTON_SELECT) or badge.pressed(BUTTON_MENU):
+    if overlay in CITY_SCREENS:
+        handle_cities()
+        return
+    if SELECT_KEY.tapped:
         overlay = "menu"
         menu_index = 0
         scroll_menu()
         return
-    watch_screenshot_hold()
     if badge.pressed(BUTTON_UP):
         move_city(-1)
     elif badge.pressed(BUTTON_DOWN):
@@ -413,16 +621,39 @@ def handle_input():
         move_time(1)
 
 
+class TapHold:
+    """One action per press: a tap (.tapped, on release) or, held for SHOT_HOLD_MS,
+    a screenshot. Only the press edge starts a press, so it can never count twice
+    even if held() lags pressed() by a frame."""
+
+    def __init__(self, button):
+        self.button = button
+        self.since = None       # ticks of the press, None when up
+        self.shot = False       # this press already saved a screenshot
+        self.tapped = False
+
+    def update(self):
+        global shot_pending
+        self.tapped = False
+        if badge.pressed(self.button):
+            self.since = badge.ticks
+            self.shot = False
+        if self.since is None:
+            return
+        if badge.held(self.button) or badge.pressed(self.button) or badge.ticks - self.since < TAP_GRACE_MS:
+            if not self.shot and badge.ticks - self.since >= SHOT_HOLD_MS:
+                shot_pending = True
+                self.shot = True
+        else:
+            self.tapped = not self.shot
+            self.since = None
+
+
+SELECT_KEY = TapHold(BUTTON_SELECT)
+
+
 def watch_screenshot_hold():
-    global shot_since, shot_pending
-    if badge.held(BUTTON_BACK):
-        if shot_since is None:
-            shot_since = badge.ticks
-        elif shot_since and badge.ticks - shot_since >= SHOT_HOLD_MS:
-            shot_pending = True
-            shot_since = 0          # once per hold
-    else:
-        shot_since = None
+    SELECT_KEY.update()
 
 
 def save_screenshot():
@@ -568,10 +799,10 @@ def about_lines():
         ("", False),
         (("Here: %s, %s (from IP, approximate)" % (g["city"], g["cc"])) if g and settings["location"] == "on"
          else "Here: off" if settings["location"] == "off" else "Here: unavailable", True),
-        ("Turn it off in Settings > Location.", True),
+        ("Turn it off in Settings > Cities > Location.", True),
         ("TLS certificates are not verified.", True),
         ("", False),
-        ("Cities: edit cities.py on the badge.", True),
+        ("Cities: Settings > Cities (saved in /state).", True),
         ("Clock: %s" % ("NTP synced" if clock.trusted() else "not synced"), True),
         ("Last error: %s" % (last_detail or "none")[:38], True),
     ]
@@ -580,7 +811,7 @@ def about_lines():
 # ---- main loop ------------------------------------------------------------------------
 
 def update():
-    global save_due, frames, fps_since, shot_pending
+    global save_due, frames, fps_since, shot_pending, city_first
     if DEBUG_FPS:
         frames += 1
         if badge.ticks - fps_since >= FPS_EVERY_MS:
@@ -605,8 +836,21 @@ def update():
         items = []
         for label, key, values, names in MENU:
             value = names[values.index(settings[key])] if key else None
-            items.append((label, value))
-        ui.menu(items, menu_index, menu_first)
+            if label == "Cities":
+                items.append((label, "%d/%d" % (len(CITY_LIST), MAX_CITIES), True))
+                continue
+            # value rows step on Right; Units and About open another screen
+            items.append((label, value, key is not None or label in ("Units", "About")))
+        ui.menu(items, menu_index, menu_first, back="Close")
+    elif overlay == "city":
+        # The Cities list stays behind a small popup, so Move up/down shows at once.
+        title, items = cities_items()
+        city_first = list_first(editing + 1, city_first, len(items))
+        anchor = ui.menu(items, editing + 1, city_first, title)
+        ui.popup([label for label, _, _ in sub_items()[1]], sub_index, anchor)
+    elif overlay in CITY_SCREENS:
+        title, items = sub_items()
+        ui.menu(items, sub_index, sub_first, title)
     elif overlay == "about":
         ui.about(about_lines())
 

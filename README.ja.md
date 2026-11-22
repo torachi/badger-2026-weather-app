@@ -14,7 +14,7 @@
 
 ## 主な機能
 
-- **現在地と登録都市**：「Here」はグローバルIPアドレスから推定します（[freeipapi.com](https://freeipapi.com/)）。上下ボタンで Here と [`weather/cities.py`](weather/cities.py) の都市を切り替えます。現在地が取れないときは、前回最後に選んでいた都市から表示を始めます。
+- **現在地と登録都市**：「Here」はグローバルIPアドレスから推定します（[freeipapi.com](https://freeipapi.com/)）。上下ボタンで Here と登録都市（最大7都市、**設定 > Cities** で編集）を切り替えます。現在地が取れないときは、前回最後に選んでいた都市から表示を始めます。
 - **時間カーソル**：左右ボタンで48時間（または7日）を移動し、長押しで連続移動します。都市を切り替えても選んだ時刻はそのまま残るので、同じ時刻で都市を比べられます。
 - **単位の切り替え**：°C/°F、m/s・km/h・mph・ノット、mm/in、24時間/12時間表示に対応しています。換算はバッジ上で行うので、切り替えてもダウンロードは発生しません。
 - **Font Awesome のアイコン**：ベクターフォント化しているので、どのサイズでも鮮明です。昼夜で絵柄が変わり、ファイルは3.5KBです。
@@ -58,16 +58,23 @@ diskutil eject /Volumes/BADGER              # その後バッジをリセット
 | ボタン | メイン画面 | 設定メニュー |
 | --- | --- | --- |
 | 上 / 下 | 地点の切り替え | 項目の移動（スクロールします） |
-| 左 / 右 | 時間カーソルの移動（長押しで連続） | 値の変更 |
-| Select | 設定メニューを開く | 値の変更・項目の実行。**Close** でメニューを閉じる |
-| Back（タッチパッド） | 1.5秒押し続けると画面を保存 | メニューを閉じる |
+| 左 | 時間カーソルを戻す（長押しで連続） | 前の画面に戻る（設定メニューでは閉じる） |
+| 右 | 時間カーソルを進める（長押しで連続） | 選択（項目の実行・画面を開く・次の値に変更） |
+| Select | 短く押すと設定メニューを開く。1.5秒押し続けると画面を保存 | 短く押すと右と同じ。1.5秒押し続けると画面を保存 |
 | Home | バッジのメニューに戻る | - |
 
-設定メニューには、表示単位（1時間ごと/1日ごと）、気温・風速・降水量・時刻の単位、**Location**（IPによる現在地推定のオン/オフ）、**Refresh now**（今すぐ更新）、**Screenshot**（画面の保存）、**About** があります。About では、データの提供元、推定した現在地、時計の状態、直近のエラーを確認できます。
+設定メニューには、**Step**（1時間ごと/1日ごと）、**Units**（気温・風速・降水量の単位）、**Clock**（24時間/12時間表示）、**Cities**（IPによる現在地推定のオン/オフを切り替える **Location** と、登録都市の追加・削除・並べ替え）、**Refresh now**（今すぐ更新）、**About** があります。各メニューの下端に、左で戻る（設定メニューでは閉じる）、右で選択、という操作の案内を表示します。Select を1.5秒押し続けると、画面を `/weather_screen.raw` に保存します。About では、データの提供元、推定した現在地、時計の状態、直近のエラーを確認できます。
 
 ## 都市の変更
 
-[`weather/cities.py`](weather/cities.py) を編集し（最大7都市）、`/Volumes/BADGER/apps/weather/` にコピーします。都市名はASCII文字だけで書いてください（バッジのフォントには日本語の字形がありません）。座標は [Open-Meteo のジオコーディングAPI](https://open-meteo.com/en/docs/geocoding-api) で調べられます（例：`https://geocoding-api.open-meteo.com/v1/search?name=Kyoto&count=1`）。
+バッジの **設定 > Cities** で変更します（最大7都市）。
+
+- **Location**：1行目にあり、IPによる現在地推定（Here）のオン/オフを右ボタンか Select で切り替えます。
+- **+ Add city**：地域を選び、組み込みの候補リスト（[`weather/catalog.py`](weather/catalog.py)、約100都市）から都市を選んで追加します。
+- 登録した都市を選ぶと、**Move up**（上へ）、**Move down**（下へ）、**Remove**（削除）ができます。この順番が、上下ボタンで切り替わる順番です。最後の1都市は削除できません。
+- 変更は `/state/weather_cities.json` に保存され、メニューを閉じると予報を取得し直します。
+
+[`weather/cities.py`](weather/cities.py) は、最初に変更するまで使う初期リストです。候補リストにない都市は `catalog.py` に追加してください。都市名はASCII文字だけで書いてください（バッジのフォントには日本語の字形がありません）。座標は [Open-Meteo のジオコーディングAPI](https://open-meteo.com/en/docs/geocoding-api) で調べられます（例：`https://geocoding-api.open-meteo.com/v1/search?name=Kyoto&count=1`）。
 
 ## 仕組み
 
@@ -109,11 +116,11 @@ python3 tools/screenshot_to_png.py weather_screen.raw screen.png --scale 2
 
 | 送信先 | 受け取る情報 | 送信先が示している保存方針 |
 | --- | --- | --- |
-| [freeipapi.com](https://freeipapi.com/privacy)（設定の Location がオンのときのみ） | グローバルIPアドレス | 監視とデバッグのためにAPIリクエストのログを保存することがある。保存期間の記載はない |
+| [freeipapi.com](https://freeipapi.com/privacy)（設定 > Cities > Location がオンのときのみ） | グローバルIPアドレス | 監視とデバッグのためにAPIリクエストのログを保存することがある。保存期間の記載はない |
 | [Open-Meteo](https://open-meteo.com/en/terms) | グローバルIPアドレスと、表示する全地点（Here を含む）の座標 | 座標を含むことがあるサーバーログは90日後に削除される |
 
 - 「Here」の座標は、保存や Open-Meteo への送信の前に小数点以下2桁（約1km）に丸めます。IPからの推定なので、通常は住所ではなく、回線事業者の接続拠点の位置になります。
-- バッジの `/state/weather_cache.json` には、Here の都市名、丸めた座標、予報データを保存します。`/state/weather.json` には設定を保存します。**Location** をオフにすると、Here の情報を削除し、推定のための通信も止めます。
+- バッジの `/state/weather_cache.json` には、Here の都市名、丸めた座標、予報データを保存します。`/state/weather.json` には設定を、`/state/weather_cities.json` には登録都市を保存します。**Location** をオフにすると、Here の情報を削除し、推定のための通信も止めます。
 - 画面には Here の都市名を表示しますが、座標は表示しません。
 - TLS証明書を検証していないため（[SECURITY.md](SECURITY.md) 参照）、信頼できないネットワークでは、どの座標を問い合わせたかを第三者に見られる可能性があります。
 - 利用状況の分析やアカウントの仕組みはありません。

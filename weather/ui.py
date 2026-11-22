@@ -254,30 +254,35 @@ def _footer(view):
 MENU_ROWS = 7   # rows shown at once; the list scrolls to keep the selection visible
 
 
-def menu(items, selected, first=0, title="Settings"):
+def menu(items, selected, first=0, title="Settings", back="Back"):
+    """Draw a menu panel; returns (y of the selected row, y of the key guide line) for popup()."""
+    sel_ry = H // 2
     screen.pen = SHADE
     screen.rectangle(0, 0, W, H)
     rows = min(MENU_ROWS, len(items))
     x, w, row = 40, 240, 22
-    h = 34 + row * rows + 6
+    guide = 18      # key guide under the list: "< Back" and "Select >"
+    h = 34 + row * rows + 6 + guide
     y = (H - h) // 2
     box(x, y, w, h, PANEL, 8)
     icon("r", x + 12, y + 9, 15, MUTED)
     sans(title, x + 34, y + 6, 16, TEXT)
     small("%d/%d" % (selected + 1, len(items)), x + w - 14, y + 11, DIM, "right")
     for i in range(first, min(first + rows, len(items))):
-        label, value = items[i]
+        label, value = items[i][:2]
+        arrows = items[i][2] if len(items[i]) > 2 else True   # False: a plain value, not a choice
         ry = y + 34 + (i - first) * row
         if i == selected:
             box(x + 6, ry - 2, w - 12, row - 2, CELL, 4)
+            sel_ry = ry
         pen = TEXT if i == selected else MUTED
         sans(label, x + 16, ry, 14, pen)
+        # Right arrow on the selected row when Right does something visible:
+        # steps a value, or opens another screen (rows without a value).
+        if i == selected and arrows:
+            screen.pen = ACCENT
+            screen.shape(shape.custom([vec2(x + w - 13, ry + 4), vec2(x + w - 13, ry + 14), vec2(x + w - 8, ry + 9)]))
         if value is not None:
-            if i == selected:
-                screen.pen = ACCENT
-                vx = x + w - 16 - sans_width(value, 14)
-                screen.shape(shape.custom([vec2(vx - 6, ry + 4), vec2(vx - 6, ry + 14), vec2(vx - 11, ry + 9)]))
-                screen.shape(shape.custom([vec2(x + w - 13, ry + 4), vec2(x + w - 13, ry + 14), vec2(x + w - 8, ry + 9)]))
             sans(value, x + w - 16, ry, 14, ACCENT if i == selected else TEXT, "right")
     # scroll hints on the panel's right edge
     screen.pen = MUTED
@@ -286,8 +291,31 @@ def menu(items, selected, first=0, title="Settings"):
         top = y + 32
         screen.shape(shape.custom([vec2(cx - 4, top + 5), vec2(cx + 4, top + 5), vec2(cx, top)]))
     if first + rows < len(items):
-        bottom = y + h - 6
+        bottom = y + h - 6 - guide
         screen.shape(shape.custom([vec2(cx - 4, bottom - 5), vec2(cx + 4, bottom - 5), vec2(cx, bottom)]))
+    gy = y + h - guide
+    screen.pen = LINE
+    screen.line(x + 10, gy, x + w - 10, gy)
+    small("< " + back, x + 14, gy + 3, DIM)
+    small("Select >", x + w - 14, gy + 3, DIM, "right")
+    return sel_ry, gy
+
+
+def popup(items, selected, anchor):
+    """A small menu beside the menu row, so the list behind stays visible.
+    anchor is menu()'s result: below the row when it fits above the key guide, else above."""
+    ry, bottom = anchor
+    row = 20
+    w, h = 116, 8 + row * len(items)
+    x = 40 + 240 - 10 - w
+    y = ry + 20 if ry + 20 + h <= bottom - 2 else ry - h - 4
+    box(x - 1, y - 1, w + 2, h + 2, LINE, 7)
+    box(x, y, w, h, PANEL, 6)
+    for i, label in enumerate(items):
+        iy = y + 4 + i * row
+        if i == selected:
+            box(x + 4, iy, w - 8, row - 2, CELL, 4)
+        sans(label, x + 12, iy + 1, 14, TEXT if i == selected else MUTED)
 
 
 def about(lines):
@@ -300,4 +328,4 @@ def about(lines):
         if text:
             small(text, 30, y, MUTED if muted else TEXT)
         y += 13
-    small("Back to return", W - 30, H - 30, DIM, "right")
+    small("< to return", W - 30, H - 30, DIM, "right")
