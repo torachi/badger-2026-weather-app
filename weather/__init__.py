@@ -142,6 +142,8 @@ menu_first = 0            # first visible menu row (the list scrolls)
 TAP_GRACE_MS = 120        # a press lasts at least this long, in case held() lags pressed()
 shot_pending = False
 shot_note_until = 0
+shot_note = None          # (title, detail, failed) shown in a popup after a screenshot
+SHOT_NOTE_MS = 2000
 SHOT_HOLD_MS = 1500
 # The framebuffer as-is: RGB565 little-endian on the badge (RGBA8888 in the
 # simulator). tools/screenshot_to_png.py converts either.
@@ -657,15 +659,20 @@ def watch_screenshot_hold():
 
 
 def save_screenshot():
-    """Write the frame just drawn (screen.raw) to SHOT_PATH."""
-    global shot_note_until
+    """Write the frame just drawn (screen.raw) to SHOT_PATH, then show the result
+    in a popup for SHOT_NOTE_MS (drawn from the next frame, so it is not in the file)."""
+    global shot_note_until, shot_note
     try:
         with open(SHOT_PATH, "wb") as f:
             f.write(screen.raw)
         print("[weather] screenshot saved to %s (%dx%d)" % (SHOT_PATH, screen.width, screen.height))
-        shot_note_until = badge.ticks + 2000
+        shot_note = ("Screenshot saved", SHOT_PATH, False)
     except OSError as e:
         print("[weather] screenshot failed:", e)
+        shot_note = ("Screenshot failed", str(e)[:30], True)
+    # Writing 150 KB to flash can take longer than SHOT_NOTE_MS, and badge.ticks
+    # is read per frame, so the timer starts on the first frame that shows it.
+    shot_note_until = None
 
 
 # ---- view model ----------------------------------------------------------------------
@@ -781,9 +788,7 @@ def build_view():
         age = (now - cache["at"]) if now else None
         view["updated"] = "Updated " + fmt_local(cache["at"], off, with_day=age is not None and age > 20 * 3600)
         view["stale"] = age is not None and age > 3 * REFRESH_EVERY_S
-    if badge.ticks < shot_note_until:
-        view["status"] = {"note": "Screenshot saved"}
-    elif job is not None:
+    if job is not None:
         view["status"] = {"busy": True, "text": job.label() or "Updating", "progress": job.progress()}
     elif last_error:
         view["status"] = {"error": last_error}
@@ -811,7 +816,7 @@ def about_lines():
 # ---- main loop ------------------------------------------------------------------------
 
 def update():
-    global save_due, frames, fps_since, shot_pending, city_first
+    global save_due, frames, fps_since, shot_pending, city_first, shot_note, shot_note_until
     if DEBUG_FPS:
         frames += 1
         if badge.ticks - fps_since >= FPS_EVERY_MS:
@@ -857,6 +862,13 @@ def update():
     if shot_pending:
         shot_pending = False
         save_screenshot()
+    elif shot_note:
+        if shot_note_until is None:
+            shot_note_until = badge.ticks + SHOT_NOTE_MS
+        if badge.ticks < shot_note_until:
+            ui.toast(*shot_note)
+        else:
+            shot_note = None
 
 
 def on_exit():

@@ -93,7 +93,8 @@ Settings: **Step** (hourly or daily), **Units** (temperature, wind and rain),
 **About** (data sources, the current location estimate, clock status and the
 last error). The bottom of each menu shows the keys: Left goes back (or closes
 the settings), Right selects. Holding Select for 1.5 s saves the screen to
-`/weather_screen.raw`.
+`/weather_screen.raw` and shows the result in a popup for 2 seconds (the popup
+is not in the saved image).
 
 ## Cities
 

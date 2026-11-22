@@ -35,7 +35,8 @@ which switches the IP lookup for **Here** off (and deletes the stored
 estimate); see below. **Refresh now** fetches immediately; **About** shows the data
 sources, the current location estimate and the last error. Each menu shows its
 keys at the bottom (Left: back, Right: select). Holding Select for 1.5 s saves
-the screen to `/weather_screen.raw` (RGB565, 320x240).
+the screen to `/weather_screen.raw` (RGB565, 320x240) and shows the result in a
+popup for 2 seconds.
 
 ## Cities
 

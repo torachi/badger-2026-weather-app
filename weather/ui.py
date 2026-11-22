@@ -301,6 +301,16 @@ def menu(items, selected, first=0, title="Settings", back="Back"):
     return sel_ry, gy
 
 
+def toast(title, detail, failed=False):
+    """A centred popup over everything (screenshot result)."""
+    w, h = 200, 50
+    x, y = (W - w) // 2, (H - h) // 2
+    box(x - 1, y - 1, w + 2, h + 2, WARN if failed else ACCENT, 9)
+    box(x, y, w, h, PANEL, 8)
+    sans(title, W // 2, y + 8, 16, WARN if failed else TEXT, "center")
+    small(detail, W // 2, y + 31, DIM, "center")
+
+
 def popup(items, selected, anchor):
     """A small menu beside the menu row, so the list behind stays visible.
     anchor is menu()'s result: below the row when it fits above the key guide, else above."""
