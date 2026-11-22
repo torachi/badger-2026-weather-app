@@ -32,7 +32,7 @@ therefore treats every response as untrusted:
   file cannot stop the app from starting.
 
 The worst a forged response can do is show wrong weather or a wrong "Here"
-city. You can switch the IP lookup off in **Settings > Location**.
+city. You can switch the IP lookup off in **Settings > Cities > Location**.
 
 ## CI
 

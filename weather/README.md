@@ -16,10 +16,10 @@ Up and Down are on the right edge.
 
 | Button | Main screen | Settings menu |
 | --- | --- | --- |
-| Up / Down | Switch location | Move between items (the list scrolls) |
-| Left / Right | Move the time cursor (hold to scroll) | Change the value |
-| Select | Open the settings menu | Change the value or run the item; **Close** leaves the menu |
-| Back (touch pad) | Hold 1.5 s to save a screenshot | Close the menu |
+| Up / Down | Switch location. Hold 1 s: switch automatically in that direction ("AUTO" in the title bar); press Up or Down to stop | Move between items (the list scrolls) |
+| Left | Move the time cursor back (hold to scroll). On the first slot: tap switches hourly/daily, hold 1 s refreshes | Go back (closes the settings menu) |
+| Right | Move the time cursor forward (hold to scroll) | Select: run the item, open it, or step to the next value |
+| Select | Tap: open the settings menu. Hold 1.5 s: screenshot | Tap: same as Right. Hold 1.5 s: screenshot |
 | Home | Return to the badge menu | - |
 
 The first location, marked with a pin, is **Here**: the app estimates it from
@@ -27,27 +27,28 @@ your public IP address. That estimate is usually city-level at best, and a VPN,
 phone tethering or a venue proxy can place you somewhere else entirely. When
 the location cannot be found, the app opens on the city you last chose instead.
 
-The settings menu changes the time step (hourly for 48 hours, or daily for 7
-days), temperature (°C/°F), wind speed (m/s, km/h, mph, knots), rain (mm/in)
-and clock (24h/12h) units. Units are converted on the badge, so changing them
-needs no download. **Location** switches the IP lookup for **Here** off (and
-deletes the stored estimate). **Refresh now** fetches immediately; **Screenshot** saves the
-screen to `/weather_screen.raw` (RGB565, 320x240); **About** shows the data
-sources, the current location estimate and the last error.
+The settings menu has Cities, Display, Refresh now and About. **Display**
+changes the time step (hourly for 48 hours, or daily for 7 days),
+temperature (°C/°F), wind speed (m/s, km/h, mph, knots), rain (mm/in) and the
+clock (24h/12h), and the **Auto cycle** interval (10 to 60 s in 10 s steps).
+Units are converted on the badge, so changing them
+needs no download. **Cities** edits the city list and holds **Location**,
+which switches the IP lookup for **Here** off (and deletes the stored
+estimate); see below. **Refresh now** fetches immediately; **About** shows the data
+sources, the current location estimate and the last error. Each menu shows its
+keys at the bottom (Left: back, Right: select). Holding Select for 1.5 s saves
+the screen to `/weather_screen.raw` (RGB565, 320x240) and shows the result in a
+popup for 2 seconds.
 
 ## Cities
 
-Edit `cities.py` to change the cities after **Here** (up to 7). Use plain ASCII
-names: the badge fonts have no Japanese glyphs.
+Add, remove and reorder the cities after **Here** (up to 7) in
+**Settings > Cities**. **+ Add city** offers the cities in `catalog.py` by
+region. The list is saved to `/state/weather_cities.json`; `cities.py` is only
+the starting list.
 
-```python
-CITIES = [
-    ("Tokyo", 35.6895, 139.69171),
-    ("San Francisco", 37.77493, -122.41942),
-]
-```
-
-Find coordinates with the
+To offer another city, add it to `catalog.py` with a plain ASCII name (the badge
+fonts have no Japanese glyphs). Find coordinates with the
 [Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api), for
 example `https://geocoding-api.open-meteo.com/v1/search?name=Kyoto&count=1`.
 
@@ -64,7 +65,7 @@ README and SECURITY.md for details.
 - All locations come from one Open-Meteo request (about 20 KB, 3 to 4 seconds
   on the badge). The body is read in small pieces between frames, so the
   buttons keep working and the footer shows progress.
-- The forecast refreshes every 30 minutes, but an automatic refresh waits until
+- The forecast refreshes every 30 minutes and at the top of every hour, but an automatic refresh waits until
   the buttons have been idle for 8 seconds. The location is re-estimated every
   6 hours. Failures retry after 1, 2 and then 5 minutes.
 - The last forecast and your settings are kept in `/state`, so the app shows

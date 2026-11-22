@@ -28,23 +28,51 @@ ui.init(
 # ---- configuration -----------------------------------------------------------------
 
 MAX_CITIES = 7
-REFRESH_EVERY_S = 30 * 60      # forecast age that triggers an automatic refresh
+REFRESH_EVERY_S = 30 * 60      # forecast age that triggers an automatic refresh (also at every local :00)
 GEO_EVERY_S = 6 * 60 * 60      # how often to re-estimate "Here"
 IDLE_BEFORE_AUTO_MS = 8000     # auto refreshes wait for the buttons to be idle
 RETRY_MS = (60_000, 120_000, 300_000)
 REPEAT_DELAY_MS = 380          # left/right auto-repeat when held
 REPEAT_EVERY_MS = 110
 SAVE_DELAY_MS = 3000           # write the selected city after this much quiet
-HOUR_SLOTS = 8
+HOUR_SLOTS = 7             # "13:00" labels need ~44 px cells
 DAY_SLOTS = 7
 
-CITY_LIST = [{"key": name, "name": name, "lat": lat, "lon": lon, "here": False}
-             for name, lat, lon in CITIES[:MAX_CITIES]]
+
+
+def _city(name, lat, lon):
+    return {"key": name, "name": name, "lat": lat, "lon": lon, "here": False}
+
+
+def _load_cities():
+    """The registered cities from /state (Settings > Cities), else the defaults in cities.py."""
+    data = {"list": None}
+    State.load("weather_cities", data)
+    out, seen = [], set()
+    entries = data.get("list")
+    for entry in entries if isinstance(entries, list) else ():
+        # A damaged or hand-edited file must not stop the app: skip anything odd.
+        if (isinstance(entry, (list, tuple)) and len(entry) == 3 and isinstance(entry[0], str)
+                and 0 < len(entry[0]) <= 24 and entry[0] not in seen and entry[0] != "here"
+                and all(isinstance(v, (int, float)) for v in entry[1:])
+                and -90 <= entry[1] <= 90 and -180 <= entry[2] <= 180):
+            seen.add(entry[0])
+            out.append(_city(*entry))
+    return out[:MAX_CITIES] if out else [_city(*c) for c in CITIES[:MAX_CITIES]]
+
+
+def save_cities():
+    State.save("weather_cities", {"list": [[c["name"], c["lat"], c["lon"]] for c in CITY_LIST]})
+
+
+CITY_LIST = _load_cities()
 
 DEFAULTS = {"step": "hour", "temp": "C", "wind": "m/s", "rain": "mm", "clock": "24h",
-            "location": "on", "last_city": None}
+            "location": "on", "last_city": None, "cycle": "10"}
+CYCLE_SECONDS = ("10", "20", "30", "40", "50", "60")   # Display > Auto cycle
 CHOICES = {"step": ("hour", "day"), "temp": units.TEMP_UNITS, "wind": units.WIND_UNITS,
-           "rain": units.RAIN_UNITS, "clock": units.CLOCKS, "location": ("on", "off")}
+           "rain": units.RAIN_UNITS, "clock": units.CLOCKS, "location": ("on", "off"),
+           "cycle": CYCLE_SECONDS}
 
 settings = dict(DEFAULTS)
 State.load("weather", settings)
@@ -84,7 +112,7 @@ def forget_here():
     g = cache.get("geo")
     if g:
         key = "%.3f,%.3f" % (g["lat"], g["lon"])
-        if key not in {"%.3f,%.3f" % (c[1], c[2]) for c in CITIES}:
+        if key not in {"%.3f,%.3f" % (c["lat"], c["lon"]) for c in CITY_LIST}:
             cache["data"].pop(key, None)
     cache["geo"] = None
     cache["geo_at"] = 0
@@ -108,12 +136,19 @@ offset = 0                # cursor: hours (hour mode) or days (day mode) from no
 strip_first = 0
 held_since = None
 next_repeat = 0
-overlay = None            # None, "menu" or "about"
+overlay = None            # None, "menu", "about" or a Cities screen (see CITY_SCREENS)
 menu_index = 0
 menu_first = 0            # first visible menu row (the list scrolls)
-shot_since = None         # Settings > Screenshot, or holding the Back touch pad, saves the screen
+# Holding Select for SHOT_HOLD_MS saves the screen.
+# Select acts on release (see TapHold) so that a hold never also acts.
+EDGE_HOLD_MS = 1000       # hold Left on the first slot this long to refresh
+edge_since = None         # ticks of a Left press that started on the first slot
+edge_done = False         # that press already refreshed
+TAP_GRACE_MS = 120        # a press lasts at least this long, in case held() lags pressed()
 shot_pending = False
 shot_note_until = 0
+shot_note = None          # (title, detail, failed) shown in a popup after a screenshot
+SHOT_NOTE_MS = 2000
 SHOT_HOLD_MS = 1500
 # The framebuffer as-is: RGB565 little-endian on the badge (RGBA8888 in the
 # simulator). tools/screenshot_to_png.py converts either.
@@ -178,10 +213,18 @@ def forecast_url_for(found_geo):
     return forecast.build_url(points), len(points)
 
 
+def is_stale(now):
+    """True when the forecast is REFRESH_EVERY_S old or a local :00 has passed since it was fetched."""
+    at = cache.get("at")
+    if now is None or not at or now < at:
+        return True
+    off = local_offset()
+    return now - at >= REFRESH_EVERY_S or (now + off) // 3600 != (at + off) // 3600
+
+
 def cache_fresh():
     now = clock.now(badge.ticks)
-    return (now is not None and bool(cache["data"]) and cache.get("at")
-            and 0 <= now - cache["at"] < REFRESH_EVERY_S)
+    return bool(cache["data"]) and not is_stale(now)
 
 
 def start_refresh(reason, want_geo=None):
@@ -246,14 +289,13 @@ def refresh_due():
     now = clock.now(badge.ticks)
     if now is None or not cache.get("at"):
         return True
-    stale = now - cache["at"] >= REFRESH_EVERY_S
-    return stale and badge.ticks - last_input >= IDLE_BEFORE_AUTO_MS
+    return is_stale(now) and badge.ticks - last_input >= IDLE_BEFORE_AUTO_MS
 
 
 # ---- input -------------------------------------------------------------------------
 
 def any_input():
-    for button in (BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_SELECT, BUTTON_BACK, BUTTON_MENU):
+    for button in (BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_SELECT):
         if badge.pressed(button) or badge.held(button):
             return True
     return False
@@ -272,7 +314,8 @@ def repeat(button):
     return False
 
 
-def move_city(step):
+def move_city(step, save=True):
+    """save=False for auto cycling: do not rewrite the settings file every few seconds."""
     global selection, user_moved, save_due
     index, _, locs = current_location()
     if not locs:
@@ -282,7 +325,57 @@ def move_city(step):
     user_moved = True
     if not loc["here"]:
         settings["last_city"] = loc["key"]
-        save_due = badge.ticks + SAVE_DELAY_MS
+        if save:
+            save_due = badge.ticks + SAVE_DELAY_MS
+
+
+# ---- auto city cycling ---------------------------------------------------------------
+#
+# Holding Up or Down for AUTO_HOLD_MS on the weather screen starts switching
+# city every Display > Auto cycle seconds, in that button's direction. Any
+# press of Up or Down stops it (that press does not also move).
+
+AUTO_HOLD_MS = 1000
+auto_dir = 0              # 0 off, -1 (Up) or 1 (Down)
+auto_next = 0             # ticks of the next switch
+ud_button = None          # Up/Down press being watched for a hold
+ud_since = 0
+
+
+def cycle_ms():
+    return int(settings["cycle"]) * 1000
+
+
+def watch_up_down():
+    global auto_dir, ud_button, ud_since, auto_next
+    for button, step in ((BUTTON_UP, -1), (BUTTON_DOWN, 1)):
+        if badge.pressed(button):
+            if auto_dir:
+                auto_dir = 0          # this press only stops auto cycling
+                ud_button = None
+            else:
+                move_city(step)
+                ud_button, ud_since = button, badge.ticks
+            return
+    if ud_button is not None:
+        if not (badge.held(ud_button) or badge.ticks - ud_since < TAP_GRACE_MS):
+            ud_button = None
+        elif badge.ticks - ud_since >= AUTO_HOLD_MS:
+            auto_dir = -1 if ud_button == BUTTON_UP else 1
+            auto_next = badge.ticks + cycle_ms()
+            ud_button = None
+
+
+def step_auto():
+    """Switch city when due (weather screen only; paused while a menu is open)."""
+    global auto_next
+    if not auto_dir:
+        return
+    if overlay is not None:
+        auto_next = badge.ticks + cycle_ms()   # restart the wait when the menu closes
+    elif badge.ticks >= auto_next:
+        move_city(auto_dir, save=False)
+        auto_next = badge.ticks + cycle_ms()
 
 
 def move_time(step):
@@ -295,17 +388,23 @@ def move_time(step):
     offset = max(0, min(limit, offset + step))
 
 
+# Most used first: the menu always opens on the top row. Set-once display
+# options are in a submenu.
 MENU = (
+    ("Cities", None, None, None),
+    ("Display", None, None, None),
+    ("Refresh now", None, None, None),
+    ("About", None, None, None),
+)
+
+# Settings > Display, a submenu of value rows (same shape as MENU entries).
+DISPLAY_MENU = (
     ("Step", "step", ("hour", "day"), ("Hourly", "Daily")),
     ("Temperature", "temp", units.TEMP_UNITS, ("°C", "°F")),
     ("Wind", "wind", units.WIND_UNITS, units.WIND_UNITS),
     ("Rain", "rain", units.RAIN_UNITS, units.RAIN_UNITS),
     ("Clock", "clock", units.CLOCKS, units.CLOCKS),
-    ("Location", "location", ("on", "off"), ("On", "Off")),
-    ("Refresh now", None, None, None),
-    ("Screenshot", None, None, None),
-    ("About", None, None, None),
-    ("Close", None, None, None),
+    ("Auto cycle", "cycle", CYCLE_SECONDS, tuple(v + " s" for v in CYCLE_SECONDS)),
 )
 
 
@@ -322,6 +421,8 @@ def cycle(entry, step):
 
 
 def handle_menu():
+    """Menu keys (all screens): Up/Down move, Left goes back, Right (or Select) selects.
+    On a value row, selecting steps to the next value."""
     global overlay, menu_index, shot_pending
     entry = MENU[menu_index]
     if badge.pressed(BUTTON_UP):
@@ -330,24 +431,21 @@ def handle_menu():
     elif badge.pressed(BUTTON_DOWN):
         menu_index = (menu_index + 1) % len(MENU)
         scroll_menu()
-    elif entry[1] and badge.pressed(BUTTON_LEFT):
-        cycle(entry, -1)
-    elif entry[1] and (badge.pressed(BUTTON_RIGHT) or badge.pressed(BUTTON_SELECT)):
+    elif badge.pressed(BUTTON_LEFT):
+        close_menu()
+    elif entry[1] and (badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped):
         cycle(entry, 1)
-    elif badge.pressed(BUTTON_SELECT):
+    elif badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped:
         label = entry[0]
         if label == "Refresh now":
             close_menu()
             start_refresh("manual", want_geo=True)
-        elif label == "Screenshot":
-            close_menu()            # this frame is drawn without the menu, then saved
-            shot_pending = True
         elif label == "About":
             overlay = "about"
-        else:
-            close_menu()
-    elif badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_MENU):
-        close_menu()
+        elif label == "Display":
+            open_screen("display", 0)
+        elif label == "Cities":
+            open_cities(0)
 
 
 def scroll_menu():
@@ -370,64 +468,299 @@ def set_location(on):
         forget_here()
         State.save("weather_cache", cache)
         if selection == "here":
-            selection = settings.get("last_city") or (CITY_LIST[0]["key"] if CITY_LIST else None)
+            selection = settings.get("last_city") or CITY_LIST[0]["key"]
 
 
 def close_menu():
-    global overlay
+    global overlay, cities_dirty
     overlay = None
     State.save("weather", settings)
+    if cities_dirty:
+        cities_dirty = False
+        start_refresh("manual", want_geo=False)
+
+
+# ---- Settings > Cities ---------------------------------------------------------------
+#
+# "display" Step / Temperature / Wind / Rain / Clock (Settings > Display, not a Cities screen,
+#           but it shares the list handling)
+# "cities"  Location (the IP-based "Here" on/off), the registered cities, then
+#           "+ Add city" (while fewer than MAX_CITIES)
+# "city"    Move up / Move down / Remove for one registered city
+# "regions" catalog regions;  "catalog"  the cities of one region (Select adds)
+
+CITY_SCREENS = ("display", "cities", "city", "regions", "catalog")
+sub_index = 0
+sub_first = 0
+editing = 0               # index in CITY_LIST on the "city" screen
+region = 0                # index in catalog.REGIONS on the "catalog" screen
+cities_dirty = False      # list changed: refetch when the menu closes
+city_first = 0            # scroll of the Cities list drawn behind the city popup
+
+
+def open_cities(city):
+    """Open the Cities list with registered city `city` (len(CITY_LIST) = "+ Add city") selected."""
+    open_screen("cities", city + 1)
+
+
+def toggle_location():
+    settings["location"] = "off" if settings["location"] == "on" else "on"
+    set_location(settings["location"] == "on")
+
+
+def open_screen(name, index):
+    global overlay, sub_index, sub_first
+    overlay = name
+    sub_index = index
+    sub_first = 0
+    scroll_sub()
+
+
+def sub_items():
+    """(title, [(label, value, arrows), ...]) for the open Cities screen."""
+    if overlay == "display":
+        return "Display", [(label, names[values.index(settings[key])], True)
+                           for label, key, values, names in DISPLAY_MENU]
+    if overlay == "cities":
+        return cities_items()
+    if overlay == "city":
+        items = [("Move up", None, False), ("Move down", None, False)]
+        if len(CITY_LIST) > 1:
+            items.append(("Remove", None, False))
+        return CITY_LIST[editing]["name"], items
+    import catalog
+    if overlay == "regions":
+        return "Add city", [(r[0], None, True) for r in catalog.REGIONS]
+    names = {c["name"] for c in CITY_LIST}
+    title, entries = catalog.REGIONS[region]
+    return title, [(e[0], "Added" if e[0] in names else None, False) for e in entries]
+
+
+def cities_items():
+    """(title, items) of the Cities list, also drawn behind the city popup."""
+    items = [("Location", "On" if settings["location"] == "on" else "Off", True)]
+    items += [(c["name"], None, True) for c in CITY_LIST]
+    if len(CITY_LIST) < MAX_CITIES:
+        items.append(("+ Add city", None, True))
+    return "Cities %d/%d" % (len(CITY_LIST), MAX_CITIES), items
+
+
+def list_first(index, first, count):
+    """Scroll offset keeping row `index` of `count` inside ui.MENU_ROWS rows."""
+    rows = min(ui.MENU_ROWS, count)
+    if index < first:
+        first = index
+    elif index >= first + rows:
+        first = index - rows + 1
+    return max(0, min(first, count - rows))
+
+
+def scroll_sub():
+    global sub_first
+    sub_first = list_first(sub_index, sub_first, len(sub_items()[1]))
+
+
+def cities_changed():
+    """Save the list, and stop a download whose URL no longer matches it."""
+    global job, selection, cities_dirty
+    save_cities()
+    cities_dirty = True
+    if job is not None:
+        job.cancel()
+        job = None
+    keys = [c["key"] for c in CITY_LIST]
+    if settings.get("last_city") not in keys:
+        settings["last_city"] = keys[0]
+    if selection != "here" and selection not in keys:
+        selection = settings["last_city"]
+
+
+def sub_back():
+    if overlay == "display":
+        open_menu_at("Display")
+    elif overlay == "cities":
+        open_menu_at("Cities")
+    elif overlay == "city":
+        open_cities(editing)
+    elif overlay == "regions":
+        open_cities(len(CITY_LIST))
+    else:
+        open_screen("regions", region)
+
+
+def open_menu_at(label):
+    global overlay, menu_index
+    overlay = "menu"
+    menu_index = [m[0] for m in MENU].index(label)
+    scroll_menu()
+
+
+def sub_select():
+    global editing, region, city_first
+    _, items = sub_items()
+    label = items[sub_index][0]
+    if overlay == "display":
+        cycle(DISPLAY_MENU[sub_index], 1)
+    elif overlay == "cities":
+        if label == "Location":
+            toggle_location()
+        elif label == "+ Add city":
+            open_screen("regions", 0)
+        else:
+            editing = sub_index - 1
+            city_first = sub_first
+            open_screen("city", 0)
+    elif overlay == "city":
+        if label == "Remove":
+            CITY_LIST.pop(editing)
+            cities_changed()
+            open_cities(min(editing, len(CITY_LIST) - 1))
+            return
+        to = editing - 1 if label == "Move up" else editing + 1
+        if 0 <= to < len(CITY_LIST):
+            CITY_LIST[editing], CITY_LIST[to] = CITY_LIST[to], CITY_LIST[editing]
+            editing = to
+            cities_changed()
+    elif overlay == "regions":
+        region = sub_index
+        open_screen("catalog", 0)
+    else:
+        import catalog
+        name, lat, lon = catalog.REGIONS[region][1][sub_index]
+        if any(c["name"] == name for c in CITY_LIST):
+            return
+        if len(CITY_LIST) < MAX_CITIES:
+            CITY_LIST.append(_city(name, lat, lon))
+            cities_changed()
+            open_cities(len(CITY_LIST) - 1)
+
+
+def handle_cities():
+    global sub_index
+    count = len(sub_items()[1])
+    if badge.pressed(BUTTON_UP):
+        sub_index = (sub_index - 1) % count
+        scroll_sub()
+    elif badge.pressed(BUTTON_DOWN):
+        sub_index = (sub_index + 1) % count
+        scroll_sub()
+    elif SELECT_KEY.tapped or badge.pressed(BUTTON_RIGHT):
+        sub_select()
+    elif badge.pressed(BUTTON_LEFT):
+        sub_back()
 
 
 def handle_input():
     global overlay, last_input, menu_index
     if any_input():
         last_input = badge.ticks
+    # Holding Select saves a screenshot on every screen, so it acts on release
+    # (TapHold.tapped) rather than on press.
+    watch_screenshot_hold()
     if overlay == "about":
-        if badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_SELECT):
+        if badge.pressed(BUTTON_LEFT) or badge.pressed(BUTTON_RIGHT) or SELECT_KEY.tapped:
             overlay = "menu"
         return
     if overlay == "menu":
         handle_menu()
         return
-    if badge.pressed(BUTTON_SELECT) or badge.pressed(BUTTON_MENU):
+    if overlay in CITY_SCREENS:
+        handle_cities()
+        return
+    if SELECT_KEY.tapped:
         overlay = "menu"
         menu_index = 0
         scroll_menu()
         return
-    watch_screenshot_hold()
-    if badge.pressed(BUTTON_UP):
-        move_city(-1)
-    elif badge.pressed(BUTTON_DOWN):
-        move_city(1)
-    if repeat(BUTTON_LEFT):
+    watch_up_down()
+    if watch_left_edge():
+        if repeat(BUTTON_RIGHT):
+            move_time(1)
+    elif repeat(BUTTON_LEFT):
         move_time(-1)
     elif repeat(BUTTON_RIGHT):
         move_time(1)
 
 
-def watch_screenshot_hold():
-    global shot_since, shot_pending
-    if badge.held(BUTTON_BACK):
-        if shot_since is None:
-            shot_since = badge.ticks
-        elif shot_since and badge.ticks - shot_since >= SHOT_HOLD_MS:
-            shot_pending = True
-            shot_since = 0          # once per hold
+def watch_left_edge():
+    """Left pressed on the first slot: a tap switches hourly/daily, a hold of
+    EDGE_HOLD_MS refreshes. Only a press that starts there counts, so holding
+    Left to scroll back to the first slot never refreshes. True while it owns Left."""
+    global edge_since, edge_done
+    if badge.pressed(BUTTON_LEFT) and offset == 0:
+        edge_since = badge.ticks
+        edge_done = False
+    if edge_since is None:
+        return False
+    if badge.held(BUTTON_LEFT) or badge.pressed(BUTTON_LEFT) or badge.ticks - edge_since < TAP_GRACE_MS:
+        if not edge_done and badge.ticks - edge_since >= EDGE_HOLD_MS:
+            edge_done = True
+            start_refresh("manual", want_geo=True)
     else:
-        shot_since = None
+        if not edge_done:
+            toggle_step()
+        edge_since = None
+    return True
+
+
+def toggle_step():
+    global offset, strip_first, save_due
+    settings["step"] = "day" if settings["step"] == "hour" else "hour"
+    offset = 0
+    strip_first = 0
+    save_due = badge.ticks + SAVE_DELAY_MS
+
+
+class TapHold:
+    """One action per press: a tap (.tapped, on release) or, held for SHOT_HOLD_MS,
+    a screenshot. Only the press edge starts a press, so it can never count twice
+    even if held() lags pressed() by a frame."""
+
+    def __init__(self, button):
+        self.button = button
+        self.since = None       # ticks of the press, None when up
+        self.shot = False       # this press already saved a screenshot
+        self.tapped = False
+
+    def update(self):
+        global shot_pending
+        self.tapped = False
+        if badge.pressed(self.button):
+            self.since = badge.ticks
+            self.shot = False
+        if self.since is None:
+            return
+        if badge.held(self.button) or badge.pressed(self.button) or badge.ticks - self.since < TAP_GRACE_MS:
+            if not self.shot and badge.ticks - self.since >= SHOT_HOLD_MS:
+                shot_pending = True
+                self.shot = True
+        else:
+            self.tapped = not self.shot
+            self.since = None
+
+
+SELECT_KEY = TapHold(BUTTON_SELECT)
+
+
+def watch_screenshot_hold():
+    SELECT_KEY.update()
 
 
 def save_screenshot():
-    """Write the frame just drawn (screen.raw) to SHOT_PATH."""
-    global shot_note_until
+    """Write the frame just drawn (screen.raw) to SHOT_PATH, then show the result
+    in a popup for SHOT_NOTE_MS (drawn from the next frame, so it is not in the file)."""
+    global shot_note_until, shot_note
     try:
         with open(SHOT_PATH, "wb") as f:
             f.write(screen.raw)
         print("[weather] screenshot saved to %s (%dx%d)" % (SHOT_PATH, screen.width, screen.height))
-        shot_note_until = badge.ticks + 2000
+        shot_note = ("Screenshot saved", SHOT_PATH, False)
     except OSError as e:
         print("[weather] screenshot failed:", e)
+        shot_note = ("Screenshot failed", str(e)[:30], True)
+    # Writing 150 KB to flash can take longer than SHOT_NOTE_MS, and badge.ticks
+    # is read per frame, so the timer starts on the first frame that shows it.
+    shot_note_until = None
 
 
 # ---- view model ----------------------------------------------------------------------
@@ -448,7 +781,7 @@ def build_slot(record, now):
     t, w, r = settings["temp"], settings["wind"], settings["rain"]
     if mode == "day":
         slot["hi"] = units.fmt_temp(raw.get("hi"), t)
-        slot["lo"] = units.fmt_temp(raw.get("lo"), t)
+        slot["lo"] = units.fmt_temp(raw.get("lo"), t, with_unit=True)   # "13° / 5°C"
         slot["facts"] = [
             (wmo.UMBRELLA, units.fmt_percent(raw.get("pp"))),
             (wmo.DROPLET, units.fmt_rain(raw.get("p"), r)),
@@ -487,13 +820,10 @@ def build_strip(record, now):
             cell["value"] = units.fmt_temp(raw.get("hi"), settings["temp"])
             cell["value2"] = units.fmt_temp(raw.get("lo"), settings["temp"])
         else:
-            if off == 0:
-                cell["label"] = "Now"
-            elif hh == 0:
-                cell["label"] = clock.WEEKDAYS[wd]
-                cell["divider"] = True
-            else:
-                cell["label"] = units.fmt_hour(hh, settings["clock"])
+            cell["divider"] = hh == 0 and mm == 0 and off != 0
+            cell["label"] = units.fmt_hour(hh, mm, settings["clock"])
+            if settings["clock"] == "12h":
+                cell["mark"] = "am" if hh < 12 else "pm"   # overline / underline
             cell["value"] = units.fmt_temp(raw.get("t"), settings["temp"])
         cells.append(cell)
     return cells, count, strip_first > 0, strip_first + count <= last
@@ -518,6 +848,10 @@ def build_view():
         "index": index, "total": max(1, len(locs)),
         "mode": settings["step"], "slot": None,
         "busy": job is not None,
+        "auto": None if not auto_dir else {
+            "dir": auto_dir,
+            "progress": max(0.0, min(1.0, 1 - (auto_next - badge.ticks) / cycle_ms())),
+        },
     }
     record = record_for(loc) if loc else None
     if record is not None:
@@ -530,8 +864,9 @@ def build_view():
                 view["when"] = "%s %d %s" % (clock.WEEKDAYS[wd], d, clock.MONTHS[m - 1])
                 view["rel"] = "Today" if offset == 0 else ("Tomorrow" if offset == 1 else "+%dd" % offset)
             else:
-                stamp = now if (slot.get("live") and now) else slot["time"]
-                view["when"] = ("Now  " if offset == 0 else "") + fmt_local(stamp, record["off"])
+                # The hour of the selected strip cell, not the clock or the current-conditions slot.
+                stamp = forecast.hour_slot(record, now, offset, live=False)["time"]
+                view["when"] = fmt_local(stamp, record["off"])
                 view["rel"] = "" if offset == 0 else "+%dh" % offset
             cells, count, more_left, more_right = build_strip(record, now)
             view.update(strip=cells, strip_slots=count, strip_more_left=more_left, strip_more_right=more_right)
@@ -545,9 +880,7 @@ def build_view():
         age = (now - cache["at"]) if now else None
         view["updated"] = "Updated " + fmt_local(cache["at"], off, with_day=age is not None and age > 20 * 3600)
         view["stale"] = age is not None and age > 3 * REFRESH_EVERY_S
-    if badge.ticks < shot_note_until:
-        view["status"] = {"note": "Screenshot saved"}
-    elif job is not None:
+    if job is not None:
         view["status"] = {"busy": True, "text": job.label() or "Updating", "progress": job.progress()}
     elif last_error:
         view["status"] = {"error": last_error}
@@ -563,10 +896,10 @@ def about_lines():
         ("", False),
         (("Here: %s, %s (from IP, approximate)" % (g["city"], g["cc"])) if g and settings["location"] == "on"
          else "Here: off" if settings["location"] == "off" else "Here: unavailable", True),
-        ("Turn it off in Settings > Location.", True),
+        ("Turn it off in Settings > Cities > Location.", True),
         ("TLS certificates are not verified.", True),
         ("", False),
-        ("Cities: edit cities.py on the badge.", True),
+        ("Cities: Settings > Cities (saved in /state).", True),
         ("Clock: %s" % ("NTP synced" if clock.trusted() else "not synced"), True),
         ("Last error: %s" % (last_detail or "none")[:38], True),
     ]
@@ -575,7 +908,7 @@ def about_lines():
 # ---- main loop ------------------------------------------------------------------------
 
 def update():
-    global save_due, frames, fps_since, shot_pending
+    global save_due, frames, fps_since, shot_pending, city_first, shot_note, shot_note_until
     if DEBUG_FPS:
         frames += 1
         if badge.ticks - fps_since >= FPS_EVERY_MS:
@@ -595,19 +928,40 @@ def update():
         save_due = 0
         State.save("weather", settings)
 
+    step_auto()
     ui.main(build_view())
     if overlay == "menu":
         items = []
         for label, key, values, names in MENU:
             value = names[values.index(settings[key])] if key else None
-            items.append((label, value))
-        ui.menu(items, menu_index, menu_first)
+            if label == "Cities":
+                items.append((label, "%d/%d" % (len(CITY_LIST), MAX_CITIES), True))
+                continue
+            # value rows step on Right; Display and About open another screen
+            items.append((label, value, key is not None or label in ("Display", "About")))
+        ui.menu(items, menu_index, menu_first, back="Close")
+    elif overlay == "city":
+        # The Cities list stays behind a small popup, so Move up/down shows at once.
+        title, items = cities_items()
+        city_first = list_first(editing + 1, city_first, len(items))
+        anchor = ui.menu(items, editing + 1, city_first, title)
+        ui.popup([label for label, _, _ in sub_items()[1]], sub_index, anchor)
+    elif overlay in CITY_SCREENS:
+        title, items = sub_items()
+        ui.menu(items, sub_index, sub_first, title)
     elif overlay == "about":
         ui.about(about_lines())
 
     if shot_pending:
         shot_pending = False
         save_screenshot()
+    elif shot_note:
+        if shot_note_until is None:
+            shot_note_until = badge.ticks + SHOT_NOTE_MS
+        if badge.ticks < shot_note_until:
+            ui.toast(*shot_note)
+        else:
+            shot_note = None
 
 
 def on_exit():

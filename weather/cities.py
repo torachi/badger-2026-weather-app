@@ -1,4 +1,5 @@
-# Registered cities for the Weather app.
+# The starting city list. Once you change the list in Settings > Cities it is
+# kept in /state/weather_cities.json and this file is no longer read.
 #
 # Each entry is (display name, latitude, longitude). Names must be plain ASCII
 # (the badge fonts have no Japanese glyphs) and short enough to fit the title

@@ -73,8 +73,8 @@ def fmt_clock(hour, minute, clock):
     return "%02d:%02d" % (hour, minute)
 
 
-def fmt_hour(hour, clock):
-    """Compact hour label for the timeline strip."""
+def fmt_hour(hour, minute, clock):
+    """Timeline strip label: "13:00" (24h) or "1:00" (12h; the strip marks AM/PM with a line)."""
     if clock == "12h":
-        return "%d%s" % (hour % 12 or 12, "a" if hour < 12 else "p")
-    return "%02d" % hour
+        return "%d:%02d" % (hour % 12 or 12, minute)
+    return "%02d:%02d" % (hour, minute)

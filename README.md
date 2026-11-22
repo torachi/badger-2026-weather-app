@@ -19,7 +19,7 @@ or day by day for a week.
 
 - **Here + your cities.** "Here" comes from your public IP address
   ([freeipapi.com](https://freeipapi.com/)); Up and Down cycle through it and
-  the cities in [`weather/cities.py`](weather/cities.py). If the location
+  your cities (up to 7, edited in **Settings > Cities**). If the location
   cannot be found, the app opens on the city you last chose.
 - **Time cursor.** Left and Right step through 48 hours (or 7 days); hold to
   scroll. The selected time keeps its place when you switch cities, so you can
@@ -81,22 +81,38 @@ bottom, and Up and Down on the right edge.
 
 | Button | Main screen | Settings menu |
 | --- | --- | --- |
-| Up / Down | Switch location | Move between items (the list scrolls) |
-| Left / Right | Move the time cursor (hold to scroll) | Change the value |
-| Select | Open the settings menu | Change the value or run the item; **Close** leaves the menu |
-| Back (touch pad) | Hold 1.5 s to save a screenshot | Close the menu |
+| Up / Down | Switch location. Hold 1 s: switch automatically in that direction ("AUTO" in the title bar); press Up or Down to stop | Move between items (the list scrolls) |
+| Left | Move the time cursor back (hold to scroll). On the first slot: tap switches hourly/daily, hold 1 s refreshes | Go back (closes the settings menu) |
+| Right | Move the time cursor forward (hold to scroll) | Select: run the item, open it, or step to the next value |
+| Select | Tap: open the settings menu. Hold 1.5 s: screenshot | Tap: same as Right. Hold 1.5 s: screenshot |
 | Home | Return to the badge menu | - |
 
-Settings: time step (hourly or daily), temperature, wind, rain and clock units,
-**Location** (switch the IP-based "Here" off), **Refresh now**, **Screenshot**
-and **About** (data sources, the current location estimate, clock status and
-the last error).
+Settings, most used first: **Cities** (switch the IP-based "Here" off with
+**Location**, and add, remove and reorder cities), **Display** (hourly or
+daily, temperature, wind and rain units, the 24h/12h clock, and the **Auto cycle** interval, 10 to 60 s), **Refresh
+now** and **About** (data sources, the current location estimate, clock status and the
+last error). The bottom of each menu shows the keys: Left goes back (or closes
+the settings), Right selects. Holding Select for 1.5 s saves the screen to
+`/weather_screen.raw` and shows the result in a popup for 2 seconds (the popup
+is not in the saved image).
 
 ## Cities
 
-Edit [`weather/cities.py`](weather/cities.py) (up to 7 entries) and copy it to
-`/Volumes/BADGER/apps/weather/`. Names must be plain ASCII: the badge fonts have
-no Japanese glyphs. Find coordinates with the
+Open **Settings > Cities** on the badge (up to 7 cities):
+
+- **Location**, the first row, switches the IP-based "Here" on and off
+  (Right or Select).
+- **+ Add city** picks a region, then a city from the built-in list
+  ([`weather/catalog.py`](weather/catalog.py), about 100 cities).
+- Select a registered city to **Move up**, **Move down** or **Remove** it. The
+  order is the order Up and Down cycle through. The last city cannot be removed.
+- Changes are saved to `/state/weather_cities.json`, and the forecast is fetched
+  again when you close the menu.
+
+[`weather/cities.py`](weather/cities.py) holds the list used until you first
+change it. To add a city that is not in the catalog, add it to `catalog.py`
+(plain ASCII names; the badge fonts have no Japanese glyphs) and find its
+coordinates with the
 [Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api), e.g.
 `https://geocoding-api.open-meteo.com/v1/search?name=Kyoto&count=1`.
 
@@ -150,7 +166,7 @@ What leaves the badge, and where it goes:
 
 | Recipient | What it receives | What it says it keeps |
 | --- | --- | --- |
-| [freeipapi.com](https://freeipapi.com/privacy) (only while Settings > Location is On) | Your public IP address | API request logs may be kept for monitoring and debugging; no retention period is stated |
+| [freeipapi.com](https://freeipapi.com/privacy) (only while Settings > Cities > Location is On) | Your public IP address | API request logs may be kept for monitoring and debugging; no retention period is stated |
 | [Open-Meteo](https://open-meteo.com/en/terms) | Your public IP address and the coordinates of every location shown, including "Here" | Server logs, which may contain coordinates, are deleted after 90 days |
 
 - "Here" is rounded to 2 decimal places (about 1 km) before it is stored or
@@ -158,7 +174,7 @@ What leaves the badge, and where it goes:
   nearest point of presence, not your address.
 - On the badge, `/state/weather_cache.json` holds the "Here" city and its
   rounded coordinates plus the cached forecasts; `/state/weather.json` holds
-  your settings. Turning **Location** off deletes the "Here" entry and stops
+  your settings and `/state/weather_cities.json` your cities. Turning **Location** off deletes the "Here" entry and stops
   the lookup.
 - The screen shows the "Here" city name but never its coordinates.
 - TLS certificates are not verified (see [SECURITY.md](SECURITY.md)), so on an
