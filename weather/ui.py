@@ -111,17 +111,35 @@ def _title(view):
     if view["here"]:
         icon("p", x, 7, 15, ACCENT)
         x += 19
-    name = fit(view["name"], 18, 228 - x)
-    sans(name, x, 2, 18, TEXT)
+    auto = view.get("auto")
     # position among locations, with up/down hints
     text = "%d/%d" % (view["index"] + 1, view["total"])
     right = W - 10
+    counter_x = right - 12 - small_width(text)
+    name_right = counter_x - 8
+    if auto:
+        # "AUTO" tag left of the counter while cities switch by themselves
+        tag_w = small_width("AUTO") + 8
+        tag_x = counter_x - 6 - tag_w
+        box(tag_x, 5, tag_w, 15, ACCENT, 3)
+        small("AUTO", tag_x + 4, 6, BG)
+        name_right = tag_x - 6
+    name = fit(view["name"], 18, name_right - x)
+    sans(name, x, 2, 18, TEXT)
     small(text, right - 12, 9, MUTED, "right")
-    screen.pen = MUTED if view["total"] > 1 else DIM
+    dim = MUTED if view["total"] > 1 else DIM
+    up_pen = ACCENT if auto and auto["dir"] < 0 else dim
+    down_pen = ACCENT if auto and auto["dir"] > 0 else dim
+    screen.pen = up_pen
     screen.shape(shape.custom([vec2(right - 8, 10), vec2(right, 10), vec2(right - 4, 5)]))
+    screen.pen = down_pen
     screen.shape(shape.custom([vec2(right - 8, 13), vec2(right, 13), vec2(right - 4, 18)]))
     screen.pen = LINE
     screen.line(0, 26, W, 26)
+    if auto:
+        # time until the next switch, as a bar along the title rule
+        screen.pen = ACCENT
+        screen.rectangle(0, 25, int(W * auto["progress"]), 2)
 
 
 def _empty(view):

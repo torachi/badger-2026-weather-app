@@ -68,9 +68,11 @@ def save_cities():
 CITY_LIST = _load_cities()
 
 DEFAULTS = {"step": "hour", "temp": "C", "wind": "m/s", "rain": "mm", "clock": "24h",
-            "location": "on", "last_city": None}
+            "location": "on", "last_city": None, "cycle": "10"}
+CYCLE_SECONDS = ("10", "20", "30", "40", "50", "60")   # Display > Auto cycle
 CHOICES = {"step": ("hour", "day"), "temp": units.TEMP_UNITS, "wind": units.WIND_UNITS,
-           "rain": units.RAIN_UNITS, "clock": units.CLOCKS, "location": ("on", "off")}
+           "rain": units.RAIN_UNITS, "clock": units.CLOCKS, "location": ("on", "off"),
+           "cycle": CYCLE_SECONDS}
 
 settings = dict(DEFAULTS)
 State.load("weather", settings)
@@ -312,7 +314,8 @@ def repeat(button):
     return False
 
 
-def move_city(step):
+def move_city(step, save=True):
+    """save=False for auto cycling: do not rewrite the settings file every few seconds."""
     global selection, user_moved, save_due
     index, _, locs = current_location()
     if not locs:
@@ -322,7 +325,57 @@ def move_city(step):
     user_moved = True
     if not loc["here"]:
         settings["last_city"] = loc["key"]
-        save_due = badge.ticks + SAVE_DELAY_MS
+        if save:
+            save_due = badge.ticks + SAVE_DELAY_MS
+
+
+# ---- auto city cycling ---------------------------------------------------------------
+#
+# Holding Up or Down for AUTO_HOLD_MS on the weather screen starts switching
+# city every Display > Auto cycle seconds, in that button's direction. Any
+# press of Up or Down stops it (that press does not also move).
+
+AUTO_HOLD_MS = 1000
+auto_dir = 0              # 0 off, -1 (Up) or 1 (Down)
+auto_next = 0             # ticks of the next switch
+ud_button = None          # Up/Down press being watched for a hold
+ud_since = 0
+
+
+def cycle_ms():
+    return int(settings["cycle"]) * 1000
+
+
+def watch_up_down():
+    global auto_dir, ud_button, ud_since, auto_next
+    for button, step in ((BUTTON_UP, -1), (BUTTON_DOWN, 1)):
+        if badge.pressed(button):
+            if auto_dir:
+                auto_dir = 0          # this press only stops auto cycling
+                ud_button = None
+            else:
+                move_city(step)
+                ud_button, ud_since = button, badge.ticks
+            return
+    if ud_button is not None:
+        if not (badge.held(ud_button) or badge.ticks - ud_since < TAP_GRACE_MS):
+            ud_button = None
+        elif badge.ticks - ud_since >= AUTO_HOLD_MS:
+            auto_dir = -1 if ud_button == BUTTON_UP else 1
+            auto_next = badge.ticks + cycle_ms()
+            ud_button = None
+
+
+def step_auto():
+    """Switch city when due (weather screen only; paused while a menu is open)."""
+    global auto_next
+    if not auto_dir:
+        return
+    if overlay is not None:
+        auto_next = badge.ticks + cycle_ms()   # restart the wait when the menu closes
+    elif badge.ticks >= auto_next:
+        move_city(auto_dir, save=False)
+        auto_next = badge.ticks + cycle_ms()
 
 
 def move_time(step):
@@ -351,6 +404,7 @@ DISPLAY_MENU = (
     ("Wind", "wind", units.WIND_UNITS, units.WIND_UNITS),
     ("Rain", "rain", units.RAIN_UNITS, units.RAIN_UNITS),
     ("Clock", "clock", units.CLOCKS, units.CLOCKS),
+    ("Auto cycle", "cycle", CYCLE_SECONDS, tuple(v + " s" for v in CYCLE_SECONDS)),
 )
 
 
@@ -618,10 +672,7 @@ def handle_input():
         menu_index = 0
         scroll_menu()
         return
-    if badge.pressed(BUTTON_UP):
-        move_city(-1)
-    elif badge.pressed(BUTTON_DOWN):
-        move_city(1)
+    watch_up_down()
     if watch_left_edge():
         if repeat(BUTTON_RIGHT):
             move_time(1)
@@ -797,6 +848,10 @@ def build_view():
         "index": index, "total": max(1, len(locs)),
         "mode": settings["step"], "slot": None,
         "busy": job is not None,
+        "auto": None if not auto_dir else {
+            "dir": auto_dir,
+            "progress": max(0.0, min(1.0, 1 - (auto_next - badge.ticks) / cycle_ms())),
+        },
     }
     record = record_for(loc) if loc else None
     if record is not None:
@@ -873,6 +928,7 @@ def update():
         save_due = 0
         State.save("weather", settings)
 
+    step_auto()
     ui.main(build_view())
     if overlay == "menu":
         items = []

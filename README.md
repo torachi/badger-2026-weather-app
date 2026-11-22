@@ -81,7 +81,7 @@ bottom, and Up and Down on the right edge.
 
 | Button | Main screen | Settings menu |
 | --- | --- | --- |
-| Up / Down | Switch location | Move between items (the list scrolls) |
+| Up / Down | Switch location. Hold 1 s: switch automatically in that direction ("AUTO" in the title bar); press Up or Down to stop | Move between items (the list scrolls) |
 | Left | Move the time cursor back (hold to scroll). On the first slot: tap switches hourly/daily, hold 1 s refreshes | Go back (closes the settings menu) |
 | Right | Move the time cursor forward (hold to scroll) | Select: run the item, open it, or step to the next value |
 | Select | Tap: open the settings menu. Hold 1.5 s: screenshot | Tap: same as Right. Hold 1.5 s: screenshot |
@@ -89,7 +89,7 @@ bottom, and Up and Down on the right edge.
 
 Settings, most used first: **Cities** (switch the IP-based "Here" off with
 **Location**, and add, remove and reorder cities), **Display** (hourly or
-daily, temperature, wind and rain units, and the 24h/12h clock), **Refresh
+daily, temperature, wind and rain units, the 24h/12h clock, and the **Auto cycle** interval, 10 to 60 s), **Refresh
 now** and **About** (data sources, the current location estimate, clock status and the
 last error). The bottom of each menu shows the keys: Left goes back (or closes
 the settings), Right selects. Holding Select for 1.5 s saves the screen to
