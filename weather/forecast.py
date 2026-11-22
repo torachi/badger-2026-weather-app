@@ -158,8 +158,9 @@ def _pick(series, index, keys):
     return {key: series[key][index] for key in keys if key in series}
 
 
-def hour_slot(record, now, offset):
-    """Values for the hour `offset` hours from now; offset 0 prefers current conditions."""
+def hour_slot(record, now, offset, live=True):
+    """Values for the hour `offset` hours from now; offset 0 prefers current conditions
+    unless live is False (the timeline strip shows the hourly forecast only)."""
     h = record["h"]
     if not h["time"]:
         return None
@@ -167,7 +168,7 @@ def hour_slot(record, now, offset):
     slot = _pick(h, index, ("time", "t", "c", "pp", "d", "w"))
     slot["live"] = False
     cur = record.get("now")
-    if offset == 0 and cur and (now is None or abs(now - cur["time"]) < 5400):
+    if live and offset == 0 and cur and (now is None or abs(now - cur["time"]) < 5400):
         for key in ("t", "f", "rh", "c", "d", "w", "p"):
             if cur.get(key) is not None:
                 slot[key] = cur[key]
@@ -191,5 +192,5 @@ def strip(record, now, mode, first, count):
     out = []
     last = max_offset(record, mode, now)
     for offset in range(first, min(first + count, last + 1)):
-        out.append((offset, hour_slot(record, now, offset) if mode == "hour" else day_slot(record, now, offset)))
+        out.append((offset, hour_slot(record, now, offset, live=False) if mode == "hour" else day_slot(record, now, offset)))
     return out

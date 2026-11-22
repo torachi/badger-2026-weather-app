@@ -63,8 +63,10 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(units.fmt_clock(0, 5, "24h"), "00:05")
         self.assertEqual(units.fmt_clock(0, 5, "12h"), "12:05am")
         self.assertEqual(units.fmt_clock(13, 0, "12h"), "1:00pm")
-        self.assertEqual(units.fmt_hour(0, "12h"), "12a")
-        self.assertEqual(units.fmt_hour(23, "24h"), "23")
+        self.assertEqual(units.fmt_hour(0, 0, "12h"), "12:00")
+        self.assertEqual(units.fmt_hour(13, 22, "12h"), "1:22")
+        self.assertEqual(units.fmt_hour(1, 22, "24h"), "01:22")
+        self.assertEqual(units.fmt_hour(23, 0, "24h"), "23:00")
 
 
 class ClockTests(unittest.TestCase):
@@ -194,6 +196,13 @@ class ForecastTests(unittest.TestCase):
         # Current conditions older than 90 minutes are not shown as "now".
         stale = forecast.hour_slot(self.tokyo, FETCHED + 2 * 3600, 0)
         self.assertFalse(stale["live"])
+
+    def test_hour_strip_shows_forecast_not_current_conditions(self):
+        _, first = forecast.strip(self.tokyo, FETCHED, "hour", 0, 7)[0]
+        base = forecast.hour_base(self.tokyo, FETCHED)
+        self.assertFalse(first["live"])
+        self.assertEqual(first["time"], self.tokyo["h"]["time"][base])
+        self.assertEqual(first["t"], self.tokyo["h"]["t"][base])
 
     def test_strip_is_clamped_to_available_data(self):
         cells = forecast.strip(self.tokyo, FETCHED, "hour", 44, 8)

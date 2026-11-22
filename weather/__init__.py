@@ -28,14 +28,14 @@ ui.init(
 # ---- configuration -----------------------------------------------------------------
 
 MAX_CITIES = 7
-REFRESH_EVERY_S = 30 * 60      # forecast age that triggers an automatic refresh
+REFRESH_EVERY_S = 30 * 60      # forecast age that triggers an automatic refresh (also at every local :00)
 GEO_EVERY_S = 6 * 60 * 60      # how often to re-estimate "Here"
 IDLE_BEFORE_AUTO_MS = 8000     # auto refreshes wait for the buttons to be idle
 RETRY_MS = (60_000, 120_000, 300_000)
 REPEAT_DELAY_MS = 380          # left/right auto-repeat when held
 REPEAT_EVERY_MS = 110
 SAVE_DELAY_MS = 3000           # write the selected city after this much quiet
-HOUR_SLOTS = 8
+HOUR_SLOTS = 7             # "13:00" labels need ~44 px cells
 DAY_SLOTS = 7
 
 CITY_LIST = [{"key": name, "name": name, "lat": lat, "lon": lon, "here": False}
@@ -178,10 +178,18 @@ def forecast_url_for(found_geo):
     return forecast.build_url(points), len(points)
 
 
+def is_stale(now):
+    """True when the forecast is REFRESH_EVERY_S old or a local :00 has passed since it was fetched."""
+    at = cache.get("at")
+    if now is None or not at or now < at:
+        return True
+    off = local_offset()
+    return now - at >= REFRESH_EVERY_S or (now + off) // 3600 != (at + off) // 3600
+
+
 def cache_fresh():
     now = clock.now(badge.ticks)
-    return (now is not None and bool(cache["data"]) and cache.get("at")
-            and 0 <= now - cache["at"] < REFRESH_EVERY_S)
+    return bool(cache["data"]) and not is_stale(now)
 
 
 def start_refresh(reason, want_geo=None):
@@ -246,8 +254,7 @@ def refresh_due():
     now = clock.now(badge.ticks)
     if now is None or not cache.get("at"):
         return True
-    stale = now - cache["at"] >= REFRESH_EVERY_S
-    return stale and badge.ticks - last_input >= IDLE_BEFORE_AUTO_MS
+    return is_stale(now) and badge.ticks - last_input >= IDLE_BEFORE_AUTO_MS
 
 
 # ---- input -------------------------------------------------------------------------
@@ -487,13 +494,10 @@ def build_strip(record, now):
             cell["value"] = units.fmt_temp(raw.get("hi"), settings["temp"])
             cell["value2"] = units.fmt_temp(raw.get("lo"), settings["temp"])
         else:
-            if off == 0:
-                cell["label"] = "Now"
-            elif hh == 0:
-                cell["label"] = clock.WEEKDAYS[wd]
-                cell["divider"] = True
-            else:
-                cell["label"] = units.fmt_hour(hh, settings["clock"])
+            cell["divider"] = hh == 0 and mm == 0 and off != 0
+            cell["label"] = units.fmt_hour(hh, mm, settings["clock"])
+            if settings["clock"] == "12h":
+                cell["mark"] = "am" if hh < 12 else "pm"   # overline / underline
             cell["value"] = units.fmt_temp(raw.get("t"), settings["temp"])
         cells.append(cell)
     return cells, count, strip_first > 0, strip_first + count <= last
@@ -530,8 +534,9 @@ def build_view():
                 view["when"] = "%s %d %s" % (clock.WEEKDAYS[wd], d, clock.MONTHS[m - 1])
                 view["rel"] = "Today" if offset == 0 else ("Tomorrow" if offset == 1 else "+%dd" % offset)
             else:
-                stamp = now if (slot.get("live") and now) else slot["time"]
-                view["when"] = ("Now  " if offset == 0 else "") + fmt_local(stamp, record["off"])
+                # The hour of the selected strip cell, not the clock or the current-conditions slot.
+                stamp = forecast.hour_slot(record, now, offset, live=False)["time"]
+                view["when"] = fmt_local(stamp, record["off"])
                 view["rel"] = "" if offset == 0 else "+%dh" % offset
             cells, count, more_left, more_right = build_strip(record, now)
             view.update(strip=cells, strip_slots=count, strip_more_left=more_left, strip_more_right=more_right)

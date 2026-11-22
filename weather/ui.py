@@ -194,6 +194,12 @@ def _strip(view):
         # label 176-183 | icon from 186 | values below, all inside 172..221.
         label_pen = TEXT if cell["selected"] else (ACCENT if cell.get("divider") else MUTED)
         small(cell["label"], x + cw / 2, top + 1, label_pen, "center")
+        mark = cell.get("mark")
+        if mark:
+            # 12h strip: a line over AM labels, under PM labels (glyphs fill rows 175-183).
+            lw = small_width(cell["label"])
+            screen.pen = label_pen
+            screen.rectangle(int(x + (cw - lw) / 2), top + 2 if mark == "am" else top + 12, int(lw), 1)
         value_pen = TEXT if cell["selected"] else MUTED
         pen = tone(cell["tone"], cell.get("d"))
         if cell.get("value2"):

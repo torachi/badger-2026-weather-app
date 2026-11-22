@@ -64,7 +64,7 @@ README and SECURITY.md for details.
 - All locations come from one Open-Meteo request (about 20 KB, 3 to 4 seconds
   on the badge). The body is read in small pieces between frames, so the
   buttons keep working and the footer shows progress.
-- The forecast refreshes every 30 minutes, but an automatic refresh waits until
+- The forecast refreshes every 30 minutes and at the top of every hour, but an automatic refresh waits until
   the buttons have been idle for 8 seconds. The location is re-estimated every
   6 hours. Failures retry after 1, 2 and then 5 minutes.
 - The last forecast and your settings are kept in `/state`, so the app shows
