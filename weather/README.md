@@ -17,7 +17,7 @@ Up and Down are on the right edge.
 | Button | Main screen | Settings menu |
 | --- | --- | --- |
 | Up / Down | Switch location | Move between items (the list scrolls) |
-| Left | Move the time cursor back (hold to scroll) | Go back (closes the settings menu) |
+| Left | Move the time cursor back (hold to scroll). On the first slot: tap switches hourly/daily, hold 1 s refreshes | Go back (closes the settings menu) |
 | Right | Move the time cursor forward (hold to scroll) | Select: run the item, open it, or step to the next value |
 | Select | Tap: open the settings menu. Hold 1.5 s: screenshot | Tap: same as Right. Hold 1.5 s: screenshot |
 | Home | Return to the badge menu | - |
@@ -27,9 +27,10 @@ your public IP address. That estimate is usually city-level at best, and a VPN,
 phone tethering or a venue proxy can place you somewhere else entirely. When
 the location cannot be found, the app opens on the city you last chose instead.
 
-The settings menu changes the time step (hourly for 48 hours, or daily for 7
-days), the **Units** of temperature (°C/°F), wind speed (m/s, km/h, mph,
-knots) and rain (mm/in), and the clock (24h/12h). Units are converted on the badge, so changing them
+The settings menu has Cities, Display, Refresh now and About. **Display**
+changes the time step (hourly for 48 hours, or daily for 7 days),
+temperature (°C/°F), wind speed (m/s, km/h, mph, knots), rain (mm/in) and the
+clock (24h/12h). Units are converted on the badge, so changing them
 needs no download. **Cities** edits the city list and holds **Location**,
 which switches the IP lookup for **Here** off (and deletes the stored
 estimate); see below. **Refresh now** fetches immediately; **About** shows the data

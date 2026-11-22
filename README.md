@@ -82,15 +82,15 @@ bottom, and Up and Down on the right edge.
 | Button | Main screen | Settings menu |
 | --- | --- | --- |
 | Up / Down | Switch location | Move between items (the list scrolls) |
-| Left | Move the time cursor back (hold to scroll) | Go back (closes the settings menu) |
+| Left | Move the time cursor back (hold to scroll). On the first slot: tap switches hourly/daily, hold 1 s refreshes | Go back (closes the settings menu) |
 | Right | Move the time cursor forward (hold to scroll) | Select: run the item, open it, or step to the next value |
 | Select | Tap: open the settings menu. Hold 1.5 s: screenshot | Tap: same as Right. Hold 1.5 s: screenshot |
 | Home | Return to the badge menu | - |
 
-Settings: **Step** (hourly or daily), **Units** (temperature, wind and rain),
-**Clock** (24h/12h), **Cities** (switch the IP-based "Here" off with
-**Location**, and add, remove and reorder cities), **Refresh now** and
-**About** (data sources, the current location estimate, clock status and the
+Settings, most used first: **Cities** (switch the IP-based "Here" off with
+**Location**, and add, remove and reorder cities), **Display** (hourly or
+daily, temperature, wind and rain units, and the 24h/12h clock), **Refresh
+now** and **About** (data sources, the current location estimate, clock status and the
 last error). The bottom of each menu shows the keys: Left goes back (or closes
 the settings), Right selects. Holding Select for 1.5 s saves the screen to
 `/weather_screen.raw` and shows the result in a popup for 2 seconds (the popup

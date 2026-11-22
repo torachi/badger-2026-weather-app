@@ -139,6 +139,9 @@ menu_index = 0
 menu_first = 0            # first visible menu row (the list scrolls)
 # Holding Select for SHOT_HOLD_MS saves the screen.
 # Select acts on release (see TapHold) so that a hold never also acts.
+EDGE_HOLD_MS = 1000       # hold Left on the first slot this long to refresh
+edge_since = None         # ticks of a Left press that started on the first slot
+edge_done = False         # that press already refreshed
 TAP_GRACE_MS = 120        # a press lasts at least this long, in case held() lags pressed()
 shot_pending = False
 shot_note_until = 0
@@ -332,20 +335,22 @@ def move_time(step):
     offset = max(0, min(limit, offset + step))
 
 
+# Most used first: the menu always opens on the top row. Set-once display
+# options are in a submenu.
 MENU = (
-    ("Step", "step", ("hour", "day"), ("Hourly", "Daily")),
-    ("Units", None, None, None),
-    ("Clock", "clock", units.CLOCKS, units.CLOCKS),
     ("Cities", None, None, None),
+    ("Display", None, None, None),
     ("Refresh now", None, None, None),
     ("About", None, None, None),
 )
 
-# Settings > Units, a submenu of value rows (same shape as MENU entries).
-UNITS_MENU = (
+# Settings > Display, a submenu of value rows (same shape as MENU entries).
+DISPLAY_MENU = (
+    ("Step", "step", ("hour", "day"), ("Hourly", "Daily")),
     ("Temperature", "temp", units.TEMP_UNITS, ("°C", "°F")),
     ("Wind", "wind", units.WIND_UNITS, units.WIND_UNITS),
     ("Rain", "rain", units.RAIN_UNITS, units.RAIN_UNITS),
+    ("Clock", "clock", units.CLOCKS, units.CLOCKS),
 )
 
 
@@ -383,8 +388,8 @@ def handle_menu():
             start_refresh("manual", want_geo=True)
         elif label == "About":
             overlay = "about"
-        elif label == "Units":
-            open_screen("units", 0)
+        elif label == "Display":
+            open_screen("display", 0)
         elif label == "Cities":
             open_cities(0)
 
@@ -423,14 +428,14 @@ def close_menu():
 
 # ---- Settings > Cities ---------------------------------------------------------------
 #
-# "units"   Temperature / Wind / Rain (Settings > Units, not a Cities screen,
+# "display" Step / Temperature / Wind / Rain / Clock (Settings > Display, not a Cities screen,
 #           but it shares the list handling)
 # "cities"  Location (the IP-based "Here" on/off), the registered cities, then
 #           "+ Add city" (while fewer than MAX_CITIES)
 # "city"    Move up / Move down / Remove for one registered city
 # "regions" catalog regions;  "catalog"  the cities of one region (Select adds)
 
-CITY_SCREENS = ("units", "cities", "city", "regions", "catalog")
+CITY_SCREENS = ("display", "cities", "city", "regions", "catalog")
 sub_index = 0
 sub_first = 0
 editing = 0               # index in CITY_LIST on the "city" screen
@@ -459,9 +464,9 @@ def open_screen(name, index):
 
 def sub_items():
     """(title, [(label, value, arrows), ...]) for the open Cities screen."""
-    if overlay == "units":
-        return "Units", [(label, names[values.index(settings[key])], True)
-                         for label, key, values, names in UNITS_MENU]
+    if overlay == "display":
+        return "Display", [(label, names[values.index(settings[key])], True)
+                           for label, key, values, names in DISPLAY_MENU]
     if overlay == "cities":
         return cities_items()
     if overlay == "city":
@@ -517,8 +522,8 @@ def cities_changed():
 
 
 def sub_back():
-    if overlay == "units":
-        open_menu_at("Units")
+    if overlay == "display":
+        open_menu_at("Display")
     elif overlay == "cities":
         open_menu_at("Cities")
     elif overlay == "city":
@@ -540,8 +545,8 @@ def sub_select():
     global editing, region, city_first
     _, items = sub_items()
     label = items[sub_index][0]
-    if overlay == "units":
-        cycle(UNITS_MENU[sub_index], 1)
+    if overlay == "display":
+        cycle(DISPLAY_MENU[sub_index], 1)
     elif overlay == "cities":
         if label == "Location":
             toggle_location()
@@ -617,10 +622,42 @@ def handle_input():
         move_city(-1)
     elif badge.pressed(BUTTON_DOWN):
         move_city(1)
-    if repeat(BUTTON_LEFT):
+    if watch_left_edge():
+        if repeat(BUTTON_RIGHT):
+            move_time(1)
+    elif repeat(BUTTON_LEFT):
         move_time(-1)
     elif repeat(BUTTON_RIGHT):
         move_time(1)
+
+
+def watch_left_edge():
+    """Left pressed on the first slot: a tap switches hourly/daily, a hold of
+    EDGE_HOLD_MS refreshes. Only a press that starts there counts, so holding
+    Left to scroll back to the first slot never refreshes. True while it owns Left."""
+    global edge_since, edge_done
+    if badge.pressed(BUTTON_LEFT) and offset == 0:
+        edge_since = badge.ticks
+        edge_done = False
+    if edge_since is None:
+        return False
+    if badge.held(BUTTON_LEFT) or badge.pressed(BUTTON_LEFT) or badge.ticks - edge_since < TAP_GRACE_MS:
+        if not edge_done and badge.ticks - edge_since >= EDGE_HOLD_MS:
+            edge_done = True
+            start_refresh("manual", want_geo=True)
+    else:
+        if not edge_done:
+            toggle_step()
+        edge_since = None
+    return True
+
+
+def toggle_step():
+    global offset, strip_first, save_due
+    settings["step"] = "day" if settings["step"] == "hour" else "hour"
+    offset = 0
+    strip_first = 0
+    save_due = badge.ticks + SAVE_DELAY_MS
 
 
 class TapHold:
@@ -693,7 +730,7 @@ def build_slot(record, now):
     t, w, r = settings["temp"], settings["wind"], settings["rain"]
     if mode == "day":
         slot["hi"] = units.fmt_temp(raw.get("hi"), t)
-        slot["lo"] = units.fmt_temp(raw.get("lo"), t)
+        slot["lo"] = units.fmt_temp(raw.get("lo"), t, with_unit=True)   # "13° / 5°C"
         slot["facts"] = [
             (wmo.UMBRELLA, units.fmt_percent(raw.get("pp"))),
             (wmo.DROPLET, units.fmt_rain(raw.get("p"), r)),
@@ -844,8 +881,8 @@ def update():
             if label == "Cities":
                 items.append((label, "%d/%d" % (len(CITY_LIST), MAX_CITIES), True))
                 continue
-            # value rows step on Right; Units and About open another screen
-            items.append((label, value, key is not None or label in ("Units", "About")))
+            # value rows step on Right; Display and About open another screen
+            items.append((label, value, key is not None or label in ("Display", "About")))
         ui.menu(items, menu_index, menu_first, back="Close")
     elif overlay == "city":
         # The Cities list stays behind a small popup, so Move up/down shows at once.
